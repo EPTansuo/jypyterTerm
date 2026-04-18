@@ -4,3 +4,4 @@ __pycache__/
 .jupyter_ystore.db
 .jupyter_ystore.db-*
 *.pyc
+.serena/
