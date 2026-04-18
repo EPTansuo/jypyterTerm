@@ -1,15 +1,16 @@
 # Jupyter Terminal
 
-一个在 Jupyter Notebook / JupyterLab 中运行的 PTY 终端组件。
+这是一个给 Jupyter Notebook 和 JupyterLab 用的终端组件。
 
-它不是简单的“输入框 + `subprocess` 输出”，而是：
+想解决的问题很直接：很多 notebook 里的“终端”其实只是个输入框，跑几条命令还行，一碰到交互程序就露馅了。这个项目走的不是那条路，它后端起的是真 PTY，前端用的是 `xterm.js`，所以用起来会更像你平时开的终端模拟器。
+
+![Jupyter Terminal Demo](docs/jupyter-terminal-demo.png)
+
+现在这版支持的东西包括：
 
 - 后端使用伪终端 `PTY`
 - 前端使用 `xterm.js`
 - 通过 widget custom message 与内核通信
-
-因此能更接近真实终端行为，包括：
-
 - shell prompt
 - ANSI 颜色和光标控制
 - `Ctrl+C`
@@ -19,8 +20,8 @@
 
 ## 文件
 
-- `jupyter_terminal.py`: 终端组件实现
-- `jupyter_terminal_demo.ipynb`: 可直接打开运行的示例 notebook
+- `jupyter_terminal.py`: 终端组件本体
+- `jupyter_terminal_demo.ipynb`: 可以直接打开的示例 notebook
 - `test_jupyter_terminal.py`: 后端 PTY 会话测试
 - `vendor/xterm/`: 本地前端资源
 
@@ -31,7 +32,7 @@
 - Linux
 - macOS
 
-需要：
+依赖不多，主要是：
 
 - Python
 - Jupyter Notebook 或 JupyterLab
@@ -45,7 +46,7 @@
 
 ## 快速开始
 
-在 notebook 中运行：
+在 notebook 里直接运行：
 
 ```python
 from jupyter_terminal import JupyterTerminal
@@ -54,7 +55,7 @@ term = JupyterTerminal(height=520)
 term.display();
 ```
 
-如果修改过模块并希望在当前内核里重新加载：
+如果你改过模块，想在当前内核里重新加载：
 
 ```python
 import importlib
@@ -66,11 +67,7 @@ from jupyter_terminal import JupyterTerminal
 
 ## 运行示例
 
-直接打开：
-
-- `jupyter_terminal_demo.ipynb`
-
-按顺序运行前两个代码单元即可。
+直接打开 `jupyter_terminal_demo.ipynb`，按顺序运行前两个代码单元就行。
 
 ## 测试
 
@@ -78,19 +75,19 @@ from jupyter_terminal import JupyterTerminal
 pytest -q
 ```
 
-在 Python 3.6 环境中测试：
+如果你要在 Python 3.6 环境里测：
 
 ```bash
 conda run -n <your-py36-env> pytest -q
 ```
 
-执行示例 notebook：
+示例 notebook 也可以这样执行：
 
 ```bash
 conda run -n <your-py36-env> jupyter nbconvert --to notebook --execute jupyter_terminal_demo.ipynb --output /tmp/jupyter_terminal_demo.py36.ipynb
 ```
 
-当前测试覆盖：
+现在的测试主要覆盖这几块：
 
 - 交互 shell 启动与输出
 - `stty size` 随窗口 resize 更新
@@ -99,5 +96,5 @@ conda run -n <your-py36-env> jupyter nbconvert --to notebook --execute jupyter_t
 ## 已知限制
 
 - 当前后端仅支持 POSIX，不支持 Windows `ConPTY`
-- 前端资源已本地化，但仍依赖 notebook 前端正确加载 `ipywidgets` / `anywidget`
-- 支持 Python 3.6，但需要保留 Python 3.6 兼容语法
+- 前端资源虽然已经本地化了，但 notebook 前端还是得能正常加载 `ipywidgets` 和 `anywidget`
+- 这份代码支持 Python 3.6，所以后面改动时也得继续守住这条兼容线
