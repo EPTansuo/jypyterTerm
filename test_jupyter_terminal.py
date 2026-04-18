@@ -1,6 +1,7 @@
 import queue
 import shutil
 import time
+from typing import List
 
 import pytest
 
@@ -94,7 +95,7 @@ def test_terminal_session_interrupt_returns_control(bash_argv):
     session.close()
 
 
-def _drain(source: queue.Queue, sink: list[str]) -> list[str]:
+def _drain(source: queue.Queue, sink: List[str]) -> List[str]:
     drained = []
     while True:
         try:

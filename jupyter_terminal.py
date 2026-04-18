@@ -7,8 +7,6 @@ Usage in a notebook cell:
     term.display()
 """
 
-from __future__ import annotations
-
 import codecs
 import errno
 import json
@@ -23,7 +21,7 @@ import threading
 from collections import deque
 from functools import lru_cache
 from pathlib import Path
-from typing import Callable, Deque, Iterable
+from typing import Callable, Deque, Dict, Iterable, List, Optional, Union
 
 try:
     import anywidget
@@ -39,7 +37,7 @@ except Exception:  # pragma: no cover - exercised only outside notebook environm
     display = None
 
 
-def _normalize_size(value: int | str, fallback_unit: str = "px") -> str:
+def _normalize_size(value: Union[int, str], fallback_unit: str = "px") -> str:
     if isinstance(value, int):
         return f"{value}{fallback_unit}"
     return value
@@ -203,13 +201,13 @@ class TerminalSession:
     def __init__(
         self,
         *,
-        cwd: str | None = None,
-        argv: Iterable[str] | None = None,
-        env: dict[str, str] | None = None,
+        cwd: Optional[str] = None,
+        argv: Optional[Iterable[str]] = None,
+        env: Optional[Dict[str, str]] = None,
         rows: int = 24,
         cols: int = 80,
-        on_output: Callable[[str], None] | None = None,
-        on_exit: Callable[[int], None] | None = None,
+        on_output: Optional[Callable[[str], None]] = None,
+        on_exit: Optional[Callable[[int], None]] = None,
     ) -> None:
         if os.name != "posix":
             raise NotImplementedError("TerminalSession currently requires a POSIX environment.")
@@ -231,9 +229,9 @@ class TerminalSession:
         merged_env["COLUMNS"] = str(self.cols)
         self.env = merged_env
 
-        self.proc: subprocess.Popen[bytes] | None = None
-        self._master_fd: int | None = None
-        self._reader_thread: threading.Thread | None = None
+        self.proc = None  # type: Optional[subprocess.Popen]
+        self._master_fd = None  # type: Optional[int]
+        self._reader_thread = None  # type: Optional[threading.Thread]
         self._write_lock = threading.Lock()
         self._closed = threading.Event()
 
@@ -393,13 +391,13 @@ class JupyterTerminal:
     def __init__(
         self,
         *,
-        cwd: str | None = None,
-        argv: Iterable[str] | None = None,
-        env: dict[str, str] | None = None,
+        cwd: Optional[str] = None,
+        argv: Optional[Iterable[str]] = None,
+        env: Optional[Dict[str, str]] = None,
         rows: int = 24,
         cols: int = 80,
-        height: int | str = 420,
-        theme: dict[str, str] | None = None,
+        height: Union[int, str] = 420,
+        theme: Optional[Dict[str, str]] = None,
         scrollback: int = 5000,
         font_size: int = 14,
     ) -> None:
@@ -441,7 +439,7 @@ class JupyterTerminal:
 
         self._displayed = False
         self._frontend_ready = False
-        self._outbox: Deque[dict[str, str]] = deque()
+        self._outbox = deque()  # type: Deque[Dict[str, str]]
         self._outbox_lock = threading.Lock()
         self._session_token = 0
         self._flush_pending = False
@@ -574,7 +572,7 @@ class JupyterTerminal:
             on_exit=lambda returncode: self._handle_exit(token, returncode),
         )
 
-    def _enqueue_op(self, op: dict[str, str]) -> None:
+    def _enqueue_op(self, op: Dict[str, str]) -> None:
         with self._outbox_lock:
             if op["op"] == "write" and self._outbox and self._outbox[-1]["op"] == "write":
                 self._outbox[-1]["data"] += op["data"]
@@ -590,7 +588,7 @@ class JupyterTerminal:
             return
 
         self._flush_pending = False
-        ops: list[dict[str, str]] = []
+        ops = []  # type: List[Dict[str, str]]
         total_chars = 0
 
         with self._outbox_lock:
@@ -623,7 +621,7 @@ class JupyterTerminal:
         self,
         _widget: widgets.Widget,
         message: dict,
-        buffers: list[memoryview],
+        buffers: List[memoryview],
     ) -> None:
         if not isinstance(message, dict):
             return
