@@ -2,7 +2,15 @@
 
 这是一个给 Jupyter Notebook 和 JupyterLab 用的终端组件。
 
-想解决的问题很直接：很多 notebook 里的“终端”其实只是个输入框，跑几条命令还行，一碰到交互程序就露馅了。这个项目走的不是那条路，它后端起的是真 PTY，前端用的是 `xterm.js`，所以用起来会更像你平时开的终端模拟器。
+先说清楚一件事：Jupyter 本身是有 Terminal 的，这个项目不是为了替代它。
+
+这个组件主要是给那些“不让你打开 Jupyter Terminal，但还允许你运行 notebook”的环境准备的。常见情况是：
+
+- 托管式 Jupyter 环境把 Terminal 入口关掉了
+- 平台只允许你在 notebook 页面里工作
+- 你需要在 notebook 里直接嵌一个可交互的 shell，而不是切到别的页面
+
+这也是它和“在 cell 里跑几条 shell 命令”之间的区别。很多 notebook 里的“终端”其实只是个输入框，跑几条命令还行，一碰到交互程序就露馅了。这个项目走的不是那条路，它后端起的是真 PTY，前端用的是 `xterm.js`，所以用起来会更像你平时开的终端模拟器。
 
 ![Jupyter Terminal Demo](docs/jupyter-terminal-demo.png)
 
