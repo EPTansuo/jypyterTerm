@@ -1,12 +1,18 @@
 import queue
 import shutil
 import time
+import json
 from pathlib import Path
 from typing import List
 
 import pytest
 
-from jupyter_terminal import TerminalSession, _build_terminal_widget_esm
+import jupyter_terminal
+from jupyter_terminal import (
+    JupyterTerminal,
+    TerminalSession,
+    _build_terminal_init_script,
+)
 
 
 def _wait_for(predicate, timeout=5.0, interval=0.05):
@@ -97,12 +103,23 @@ def test_terminal_session_interrupt_returns_control(bash_argv):
 
 
 def test_terminal_widget_frontend_maps_ctrl_c_to_sigint_input():
-    esm = _build_terminal_widget_esm()
+    init_js = _build_terminal_init_script(
+        terminal_id="term-test",
+        bridge_class="bridge-test",
+        ops_class="ops-test",
+        height="420px",
+        options_json="{}",
+    )
 
-    assert "attachCustomKeyEventHandler" in esm
-    assert 'document.addEventListener("keydown", onDocumentKeyDownCapture, true);' in esm
-    assert "term.hasSelection" in esm
-    assert 'model.send({ type: "interrupt" });' in esm
+    assert "window.__jupyterTerminalRegistry" in init_js
+    assert "attachCustomKeyEventHandler" in init_js
+    assert 'document.addEventListener("keydown", onDocumentKeyDownCapture, true);' in init_js
+    assert "term.hasSelection" in init_js
+    assert 'pushEvent({ type: "interrupt" });' in init_js
+    assert 'bridgeRoot.querySelector("input")' in init_js
+    assert 'opsRoot.querySelector("input")' in init_js
+    assert 'const opsInterval = window.setInterval(pollOps, 30);' in init_js
+    assert 'pushEvent({ type: "ack", ack_seq: payloadSeq });' in init_js
 
 
 def test_terminal_widget_backend_handles_interrupt_messages():
@@ -110,6 +127,37 @@ def test_terminal_widget_backend_handles_interrupt_messages():
 
     assert 'if msg_type == "interrupt":' in source
     assert "self._session.interrupt()" in source
+
+
+def test_jupyter_terminal_pushes_initial_shell_output_into_ops_bridge(monkeypatch):
+    class _DummyLoop:
+        @staticmethod
+        def add_callback(func):
+            func()
+
+    class _DummyKernel:
+        io_loop = _DummyLoop()
+
+    class _DummyIP:
+        kernel = _DummyKernel()
+
+    displayed = []
+
+    monkeypatch.setattr(jupyter_terminal, "get_ipython", lambda: _DummyIP())
+    monkeypatch.setattr(jupyter_terminal, "display", lambda *args, **kwargs: displayed.append((args, kwargs)))
+
+    term = JupyterTerminal(height=320)
+    term.display()
+    time.sleep(1.0)
+
+    payload = json.loads(term._ops_widget.value)
+    write_ops = [op for op in payload["ops"] if op["op"] == "write"]
+
+    assert payload["seq"] >= 1
+    assert write_ops
+    assert any(op["data"] for op in write_ops)
+
+    term.close()
 
 
 def _drain(source: queue.Queue, sink: List[str]) -> List[str]:

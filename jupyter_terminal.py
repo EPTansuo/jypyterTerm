@@ -18,22 +18,21 @@ import struct
 import subprocess
 import termios
 import threading
+import uuid
 from collections import deque
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Deque, Dict, Iterable, List, Optional, Union
 
 try:
-    import anywidget
     import ipywidgets as widgets
-    import traitlets as t
     from IPython import get_ipython
-    from IPython.display import display
+    from IPython.display import HTML, Javascript, display
 except Exception:  # pragma: no cover - exercised only outside notebook environments.
-    anywidget = None
     widgets = None
-    t = None
     get_ipython = None
+    HTML = None
+    Javascript = None
     display = None
 
 
@@ -73,176 +72,252 @@ def _build_terminal_widget_css() -> str:
     box-sizing: border-box;
     height: 100%;
 }
+
+.jupyter-terminal-bridge {
+    display: none !important;
+}
 """
     )
 
 
 @lru_cache(maxsize=None)
-def _build_terminal_widget_esm() -> str:
+def _wrap_umd_asset_for_global(asset_text: str) -> str:
+    return (
+        "(function() {\n"
+        "    var define = undefined;\n"
+        "    var module = undefined;\n"
+        "    var exports = undefined;\n"
+        + asset_text
+        + "\n}).call(globalThis);"
+    )
+
+
+@lru_cache(maxsize=None)
+def _build_terminal_frontend_preamble() -> str:
     xterm_js = _read_asset_text("vendor/xterm/xterm.js")
     fit_addon_js = _read_asset_text("vendor/xterm/addon-fit.js")
+    css_text = json.dumps(_build_terminal_widget_css())
+    xterm_bootstrap = _wrap_umd_asset_for_global(xterm_js)
+    fit_addon_bootstrap = _wrap_umd_asset_for_global(fit_addon_js)
     return f"""
+window.__jupyterTerminalRegistry = window.__jupyterTerminalRegistry || {{}};
+
+if (!document.getElementById("jupyter-terminal-style")) {{
+    const style = document.createElement("style");
+    style.id = "jupyter-terminal-style";
+    style.textContent = {css_text};
+    document.head.appendChild(style);
+}}
+
 if (!globalThis.Terminal) {{
-{xterm_js}
+{xterm_bootstrap}
 }}
 
 if (!globalThis.FitAddon) {{
-{fit_addon_js}
+{fit_addon_bootstrap}
 }}
-
-function applyHeight(el, value) {{
-    el.style.height = value || "420px";
-}}
-
-function parseOptions(model) {{
-    try {{
-        return JSON.parse(model.get("options_json") || "{{}}");
-    }} catch (error) {{
-        console.error("failed to parse terminal options", error);
-        return {{}};
-    }}
-}}
-
-export default {{
-    render({{ model, el }}) {{
-        el.classList.add("jupyter-terminal-root");
-        el.innerHTML = "";
-
-        const host = document.createElement("div");
-        host.className = "jupyter-terminal-host";
-        applyHeight(host, model.get("height"));
-        el.appendChild(host);
-
-        const term = new Terminal(parseOptions(model));
-        const fitAddon = new FitAddon.FitAddon();
-        term.loadAddon(fitAddon);
-        term.open(host);
-
-        const isInterruptChord = (event) => {{
-            const key = String(event.key || "").toLowerCase();
-            return key === "c" && (event.ctrlKey || event.metaKey) && !event.altKey;
-        }};
-
-        const hasTerminalFocus = () => {{
-            const active = document.activeElement;
-            return active === term.textarea || host.contains(active);
-        }};
-
-        const sendInterrupt = (event) => {{
-            event.preventDefault();
-            event.stopPropagation();
-            if (typeof event.stopImmediatePropagation === "function") {{
-                event.stopImmediatePropagation();
-            }}
-            model.send({{ type: "interrupt" }});
-        }};
-
-        term.attachCustomKeyEventHandler((event) => {{
-            if (event.type !== "keydown") {{
-                return true;
-            }}
-
-            if (!isInterruptChord(event)) {{
-                return true;
-            }}
-
-            if (typeof term.hasSelection === "function" && term.hasSelection()) {{
-                return true;
-            }}
-
-            sendInterrupt(event);
-            return false;
-        }});
-
-        const onDocumentKeyDownCapture = (event) => {{
-            if (!isInterruptChord(event) || !hasTerminalFocus()) {{
-                return;
-            }}
-
-            if (typeof term.hasSelection === "function" && term.hasSelection()) {{
-                return;
-            }}
-
-            sendInterrupt(event);
-        }};
-        document.addEventListener("keydown", onDocumentKeyDownCapture, true);
-
-        const fitAndReport = () => {{
-            fitAddon.fit();
-            model.send({{ type: "resize", rows: term.rows, cols: term.cols }});
-        }};
-
-        const ready = () => {{
-            fitAndReport();
-            term.focus();
-            model.send({{ type: "ready", rows: term.rows, cols: term.cols }});
-        }};
-
-        const onDataDisposable = term.onData((data) => {{
-            model.send({{ type: "input", data }});
-        }});
-
-        const onResizeDisposable = term.onResize((size) => {{
-            model.send({{ type: "resize", rows: size.rows, cols: size.cols }});
-        }});
-
-        const onHeightChange = () => {{
-            applyHeight(host, model.get("height"));
-            requestAnimationFrame(fitAndReport);
-        }};
-
-        const onMessage = (msg) => {{
-            const ops = msg && Array.isArray(msg.ops) ? msg.ops : [];
-            for (const op of ops) {{
-                if (op.op === "write") {{
-                    term.write(op.data || "");
-                }} else if (op.op === "clear") {{
-                    term.clear();
-                }} else if (op.op === "reset") {{
-                    term.reset();
-                    requestAnimationFrame(fitAndReport);
-                }} else if (op.op === "fit") {{
-                    requestAnimationFrame(fitAndReport);
-                }} else if (op.op === "focus") {{
-                    term.focus();
-                }}
-            }}
-        }};
-
-        model.on("change:height", onHeightChange);
-        model.on("msg:custom", onMessage);
-
-        let resizeObserver = null;
-        if (window.ResizeObserver) {{
-            resizeObserver = new ResizeObserver(() => {{
-                requestAnimationFrame(fitAndReport);
-            }});
-            resizeObserver.observe(host);
-        }}
-
-        requestAnimationFrame(ready);
-
-        return () => {{
-            document.removeEventListener("keydown", onDocumentKeyDownCapture, true);
-            resizeObserver?.disconnect();
-            onDataDisposable.dispose();
-            onResizeDisposable.dispose();
-            model.off("change:height", onHeightChange);
-            model.off("msg:custom", onMessage);
-            term.dispose();
-        }};
-    }},
-}};
 """
 
 
-if anywidget is not None and t is not None:
-    class _TerminalFrontendWidget(anywidget.AnyWidget):
-        _esm = _build_terminal_widget_esm()
-        _css = _build_terminal_widget_css()
+def _build_terminal_init_script(
+    *,
+    terminal_id: str,
+    bridge_class: str,
+    ops_class: str,
+    height: str,
+    options_json: str,
+) -> str:
+    return (
+        _build_terminal_frontend_preamble()
+        + f"""
+(function initTerminalBridge(attemptsLeft) {{
+    const registry = window.__jupyterTerminalRegistry;
+    const host = document.getElementById({json.dumps(terminal_id)});
+    const bridgeRoot = document.querySelector({json.dumps("." + bridge_class)});
+    const bridgeInput = bridgeRoot && bridgeRoot.querySelector("input");
+    const opsRoot = document.querySelector({json.dumps("." + ops_class)});
+    const opsInput = opsRoot && opsRoot.querySelector("input");
 
-        height = t.Unicode("420px").tag(sync=True)
-        options_json = t.Unicode("{}").tag(sync=True)
+    if (!host || !bridgeInput || !opsInput) {{
+        if (attemptsLeft > 0) {{
+            requestAnimationFrame(() => initTerminalBridge(attemptsLeft - 1));
+        }}
+        return;
+    }}
+
+    if (registry[{json.dumps(terminal_id)}]) {{
+        const existing = registry[{json.dumps(terminal_id)}];
+        host.style.height = {json.dumps(height)};
+        existing.fitAndReport();
+        existing.term.focus();
+        return;
+    }}
+
+    host.classList.add("jupyter-terminal-root", "jupyter-terminal-host");
+    host.style.height = {json.dumps(height)};
+    host.innerHTML = "";
+
+    let sequence = Date.now();
+    const parsedOptions = JSON.parse({json.dumps(options_json)});
+    const term = new Terminal(parsedOptions);
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(host);
+
+    const pushEvent = (payload) => {{
+        sequence += 1;
+        bridgeInput.value = JSON.stringify(Object.assign({{ seq: sequence }}, payload));
+        bridgeInput.dispatchEvent(new Event("input", {{ bubbles: true }}));
+        bridgeInput.dispatchEvent(new Event("change", {{ bubbles: true }}));
+    }};
+
+    let lastOpsRaw = null;
+    let lastOpsSeq = 0;
+
+    const applyOps = (payload) => {{
+        const ops = payload && Array.isArray(payload.ops) ? payload.ops : [];
+        for (const op of ops) {{
+            if (op.op === "write") {{
+                term.write(op.data || "");
+            }} else if (op.op === "clear") {{
+                term.clear();
+            }} else if (op.op === "reset") {{
+                term.reset();
+                requestAnimationFrame(fitAndReport);
+            }} else if (op.op === "fit") {{
+                requestAnimationFrame(fitAndReport);
+            }} else if (op.op === "focus") {{
+                term.focus();
+            }} else if (op.op === "dispose") {{
+                registry[{json.dumps(terminal_id)}].dispose();
+            }}
+        }}
+    }};
+
+    const pollOps = () => {{
+        const raw = opsInput.value || "";
+        if (!raw || raw === lastOpsRaw) {{
+            return;
+        }}
+        lastOpsRaw = raw;
+
+        let payload = null;
+        try {{
+            payload = JSON.parse(raw);
+        }} catch (error) {{
+            console.error("failed to parse terminal ops payload", error);
+            return;
+        }}
+
+        const payloadSeq = Number(payload.seq || 0);
+        if (payloadSeq && payloadSeq <= lastOpsSeq) {{
+            return;
+        }}
+        lastOpsSeq = payloadSeq;
+        applyOps(payload);
+        if (payloadSeq) {{
+            pushEvent({{ type: "ack", ack_seq: payloadSeq }});
+        }}
+    }};
+
+    const fitAndReport = () => {{
+        fitAddon.fit();
+        pushEvent({{ type: "resize", rows: term.rows, cols: term.cols }});
+    }};
+
+    const isInterruptChord = (event) => {{
+        const key = String(event.key || "").toLowerCase();
+        return key === "c" && (event.ctrlKey || event.metaKey) && !event.altKey;
+    }};
+
+    const hasTerminalFocus = () => {{
+        const active = document.activeElement;
+        return active === term.textarea || host.contains(active);
+    }};
+
+    const sendInterrupt = (event) => {{
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === "function") {{
+            event.stopImmediatePropagation();
+        }}
+        pushEvent({{ type: "interrupt" }});
+    }};
+
+    term.attachCustomKeyEventHandler((event) => {{
+        if (event.type !== "keydown") {{
+            return true;
+        }}
+
+        if (!isInterruptChord(event)) {{
+            return true;
+        }}
+
+        if (typeof term.hasSelection === "function" && term.hasSelection()) {{
+            return true;
+        }}
+
+        sendInterrupt(event);
+        return false;
+    }});
+
+    const onDocumentKeyDownCapture = (event) => {{
+        if (!isInterruptChord(event) || !hasTerminalFocus()) {{
+            return;
+        }}
+
+        if (typeof term.hasSelection === "function" && term.hasSelection()) {{
+            return;
+        }}
+
+        sendInterrupt(event);
+    }};
+    document.addEventListener("keydown", onDocumentKeyDownCapture, true);
+
+    const onDataDisposable = term.onData((data) => {{
+        pushEvent({{ type: "input", data: data }});
+    }});
+
+    const onResizeDisposable = term.onResize((size) => {{
+        pushEvent({{ type: "resize", rows: size.rows, cols: size.cols }});
+    }});
+
+    let resizeObserver = null;
+    if (window.ResizeObserver) {{
+        resizeObserver = new ResizeObserver(() => {{
+            requestAnimationFrame(fitAndReport);
+        }});
+        resizeObserver.observe(host);
+    }}
+
+    const opsInterval = window.setInterval(pollOps, 30);
+
+    registry[{json.dumps(terminal_id)}] = {{
+        host: host,
+        term: term,
+        fitAndReport: fitAndReport,
+        dispose: function() {{
+            document.removeEventListener("keydown", onDocumentKeyDownCapture, true);
+            window.clearInterval(opsInterval);
+            if (resizeObserver) {{
+                resizeObserver.disconnect();
+            }}
+            onDataDisposable.dispose();
+            onResizeDisposable.dispose();
+            term.dispose();
+            delete registry[{json.dumps(terminal_id)}];
+        }}
+    }};
+    pollOps();
+
+    requestAnimationFrame(() => {{
+        fitAndReport();
+        term.focus();
+        pushEvent({{ type: "ready", rows: term.rows, cols: term.cols }});
+    }});
+}})(30);
+"""
+    )
 
 
 class TerminalSession:
@@ -451,8 +526,8 @@ class JupyterTerminal:
         scrollback: int = 5000,
         font_size: int = 14,
     ) -> None:
-        if anywidget is None or widgets is None or display is None or get_ipython is None:
-            raise RuntimeError("anywidget, ipywidgets and IPython are required to use JupyterTerminal.")
+        if widgets is None or display is None or get_ipython is None or Javascript is None or HTML is None:
+            raise RuntimeError("ipywidgets and IPython are required to use JupyterTerminal.")
         if get_ipython() is None:
             raise RuntimeError("JupyterTerminal must be created inside an IPython kernel.")
 
@@ -492,7 +567,12 @@ class JupyterTerminal:
         self._outbox = deque()  # type: Deque[Dict[str, str]]
         self._outbox_lock = threading.Lock()
         self._session_token = 0
-        self._flush_pending = False
+        self._last_frontend_seq = 0
+        self._ops_seq = 0
+        self._ops_inflight = None  # type: Optional[int]
+        self._terminal_id = "jupyter_terminal_" + uuid.uuid4().hex
+        self._bridge_class = "jupyter_terminal_bridge_" + uuid.uuid4().hex
+        self._ops_class = "jupyter_terminal_ops_" + uuid.uuid4().hex
 
         self.status = widgets.HTML(
             value=f"<span style='font-family:monospace'>starting in {self.cwd}</span>"
@@ -515,22 +595,27 @@ class JupyterTerminal:
             layout=widgets.Layout(width="70px"),
         )
 
-        options = {
-            "cols": self.cols,
-            "rows": self.rows,
-            "fontSize": self.font_size,
-            "cursorBlink": True,
-            "scrollback": self.scrollback,
-            "allowTransparency": False,
-            "convertEol": False,
-            "theme": self.theme,
-        }
-        self._terminal_widget = _TerminalFrontendWidget(
-            height=self.height,
-            options_json=json.dumps(options),
+        self._bridge_widget = widgets.Text(
+            value="",
+            description="",
+            layout=widgets.Layout(width="1px", height="1px"),
+        )
+        self._bridge_widget.add_class("jupyter-terminal-bridge")
+        self._bridge_widget.add_class(self._bridge_class)
+        self._bridge_widget.observe(self._on_frontend_bridge_change, names="value")
+
+        self._ops_widget = widgets.Text(
+            value="",
+            description="",
+            layout=widgets.Layout(width="1px", height="1px"),
+        )
+        self._ops_widget.add_class("jupyter-terminal-bridge")
+        self._ops_widget.add_class(self._ops_class)
+
+        self._terminal_host = widgets.HTML(
+            value=f'<div id="{self._terminal_id}"></div>',
             layout=widgets.Layout(width="100%"),
         )
-        self._terminal_widget.on_msg(self._on_frontend_message)
 
         self.widget = widgets.VBox(
             [
@@ -544,7 +629,9 @@ class JupyterTerminal:
                     ],
                     layout=widgets.Layout(align_items="center", gap="8px"),
                 ),
-                self._terminal_widget,
+                self._bridge_widget,
+                self._ops_widget,
+                self._terminal_host,
             ]
         )
 
@@ -560,8 +647,8 @@ class JupyterTerminal:
             display(self.widget)
             self._displayed = True
 
+        self._ensure_frontend_bound()
         self.start()
-        self.fit()
 
     def start(self) -> None:
         if self._session.is_running():
@@ -574,7 +661,6 @@ class JupyterTerminal:
 
     def clear(self) -> None:
         self._enqueue_op({"op": "clear"})
-        self.focus()
 
     def fit(self) -> None:
         self._enqueue_op({"op": "fit"})
@@ -596,6 +682,7 @@ class JupyterTerminal:
         old_session = self._session
         self._session = self._make_session()
         old_session.close()
+        self._enqueue_op({"op": "dispose"})
         self._set_status("closed")
 
     def _handle_output(self, token: int, text: str) -> None:
@@ -634,10 +721,9 @@ class JupyterTerminal:
         self._run_on_main_thread(self._flush_outbox)
 
     def _flush_outbox(self) -> None:
-        if not self._frontend_ready:
+        if self._ops_inflight is not None:
             return
 
-        self._flush_pending = False
         ops = []  # type: List[Dict[str, str]]
         total_chars = 0
 
@@ -653,28 +739,32 @@ class JupyterTerminal:
         if not ops:
             return
 
-        payload_ops = []
-        for op in ops:
-            if op["op"] == "write":
-                payload_ops.append({"op": "write", "data": op["data"]})
-            else:
-                payload_ops.append(op)
-
-        self._terminal_widget.send({"ops": payload_ops})
+        self._ops_seq += 1
+        self._ops_inflight = self._ops_seq
+        self._ops_widget.value = json.dumps({"seq": self._ops_seq, "ops": ops})
 
         with self._outbox_lock:
             has_more = bool(self._outbox)
-        if has_more:
+        if has_more and self._ops_inflight is None:
             self._schedule_flush()
 
-    def _on_frontend_message(
-        self,
-        _widget: widgets.Widget,
-        message: dict,
-        buffers: List[memoryview],
-    ) -> None:
-        if not isinstance(message, dict):
+    def _on_frontend_bridge_change(self, change: dict) -> None:
+        if change.get("name") != "value":
             return
+
+        raw_value = change.get("new", "")
+        if not raw_value:
+            return
+
+        try:
+            message = json.loads(raw_value)
+        except Exception:
+            return
+
+        seq = int(message.get("seq", 0))
+        if seq and seq <= self._last_frontend_seq:
+            return
+        self._last_frontend_seq = seq
 
         msg_type = message.get("type")
         if msg_type == "ready":
@@ -682,7 +772,6 @@ class JupyterTerminal:
             self.rows = int(message.get("rows", self.rows))
             self.cols = int(message.get("cols", self.cols))
             self._session.resize(self.rows, self.cols)
-            self.focus()
             self._flush_outbox()
             return
 
@@ -696,11 +785,41 @@ class JupyterTerminal:
             self._session.interrupt()
             return
 
+        if msg_type == "ack":
+            ack_seq = int(message.get("ack_seq", 0))
+            if self._ops_inflight == ack_seq:
+                self._ops_inflight = None
+                self._schedule_flush()
+            return
+
         if msg_type == "resize":
             self.rows = int(message.get("rows", self.rows))
             self.cols = int(message.get("cols", self.cols))
             self._session.resize(self.rows, self.cols)
             return
+
+    def _ensure_frontend_bound(self) -> None:
+        options = {
+            "cols": self.cols,
+            "rows": self.rows,
+            "fontSize": self.font_size,
+            "cursorBlink": True,
+            "scrollback": self.scrollback,
+            "allowTransparency": False,
+            "convertEol": False,
+            "theme": self.theme,
+        }
+        display(
+            Javascript(
+                _build_terminal_init_script(
+                    terminal_id=self._terminal_id,
+                    bridge_class=self._bridge_class,
+                    ops_class=self._ops_class,
+                    height=self.height,
+                    options_json=json.dumps(options),
+                )
+            )
+        )
 
     def _set_status(self, text: str) -> None:
         self._run_on_main_thread(

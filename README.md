@@ -18,7 +18,7 @@
 
 - 后端使用伪终端 `PTY`
 - 前端使用 `xterm.js`
-- 通过 widget custom message 与内核通信
+- 通过 `ipywidgets` + 前端 JS 桥接与内核通信
 - shell prompt
 - ANSI 颜色和光标控制
 - `Ctrl+C`
@@ -45,7 +45,6 @@
 - Python
 - Jupyter Notebook 或 JupyterLab
 - `ipywidgets`
-- `anywidget`
 
 已验证的环境：
 
@@ -104,5 +103,5 @@ conda run -n <your-py36-env> jupyter nbconvert --to notebook --execute jupyter_t
 ## 已知限制
 
 - 当前后端仅支持 POSIX，不支持 Windows `ConPTY`
-- 前端资源虽然已经本地化了，但 notebook 前端还是得能正常加载 `ipywidgets` 和 `anywidget`
+- 当前前端实现依赖 `ipywidgets` 和 notebook 前端允许执行注入的 Javascript
 - 这份代码支持 Python 3.6，所以后面改动时也得继续守住这条兼容线
