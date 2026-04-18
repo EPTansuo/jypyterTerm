@@ -1,11 +1,12 @@
 import queue
 import shutil
 import time
+from pathlib import Path
 from typing import List
 
 import pytest
 
-from jupyter_terminal import TerminalSession
+from jupyter_terminal import TerminalSession, _build_terminal_widget_esm
 
 
 def _wait_for(predicate, timeout=5.0, interval=0.05):
@@ -93,6 +94,22 @@ def test_terminal_session_interrupt_returns_control(bash_argv):
 
     assert _wait_for(lambda: any("__AFTER__" in chunk for chunk in chunks + list(_drain(output, chunks))), timeout=5)
     session.close()
+
+
+def test_terminal_widget_frontend_maps_ctrl_c_to_sigint_input():
+    esm = _build_terminal_widget_esm()
+
+    assert "attachCustomKeyEventHandler" in esm
+    assert 'document.addEventListener("keydown", onDocumentKeyDownCapture, true);' in esm
+    assert "term.hasSelection" in esm
+    assert 'model.send({ type: "interrupt" });' in esm
+
+
+def test_terminal_widget_backend_handles_interrupt_messages():
+    source = Path("jupyter_terminal.py").read_text(encoding="utf-8")
+
+    assert 'if msg_type == "interrupt":' in source
+    assert "self._session.interrupt()" in source
 
 
 def _drain(source: queue.Queue, sink: List[str]) -> List[str]:

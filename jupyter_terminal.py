@@ -118,6 +118,55 @@ export default {{
         term.loadAddon(fitAddon);
         term.open(host);
 
+        const isInterruptChord = (event) => {{
+            const key = String(event.key || "").toLowerCase();
+            return key === "c" && (event.ctrlKey || event.metaKey) && !event.altKey;
+        }};
+
+        const hasTerminalFocus = () => {{
+            const active = document.activeElement;
+            return active === term.textarea || host.contains(active);
+        }};
+
+        const sendInterrupt = (event) => {{
+            event.preventDefault();
+            event.stopPropagation();
+            if (typeof event.stopImmediatePropagation === "function") {{
+                event.stopImmediatePropagation();
+            }}
+            model.send({{ type: "interrupt" }});
+        }};
+
+        term.attachCustomKeyEventHandler((event) => {{
+            if (event.type !== "keydown") {{
+                return true;
+            }}
+
+            if (!isInterruptChord(event)) {{
+                return true;
+            }}
+
+            if (typeof term.hasSelection === "function" && term.hasSelection()) {{
+                return true;
+            }}
+
+            sendInterrupt(event);
+            return false;
+        }});
+
+        const onDocumentKeyDownCapture = (event) => {{
+            if (!isInterruptChord(event) || !hasTerminalFocus()) {{
+                return;
+            }}
+
+            if (typeof term.hasSelection === "function" && term.hasSelection()) {{
+                return;
+            }}
+
+            sendInterrupt(event);
+        }};
+        document.addEventListener("keydown", onDocumentKeyDownCapture, true);
+
         const fitAndReport = () => {{
             fitAddon.fit();
             model.send({{ type: "resize", rows: term.rows, cols: term.cols }});
@@ -174,6 +223,7 @@ export default {{
         requestAnimationFrame(ready);
 
         return () => {{
+            document.removeEventListener("keydown", onDocumentKeyDownCapture, true);
             resizeObserver?.disconnect();
             onDataDisposable.dispose();
             onResizeDisposable.dispose();
@@ -640,6 +690,10 @@ class JupyterTerminal:
             data = message.get("data", "")
             if data:
                 self._session.write(data.encode("utf-8"))
+            return
+
+        if msg_type == "interrupt":
+            self._session.interrupt()
             return
 
         if msg_type == "resize":
