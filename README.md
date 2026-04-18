@@ -14,6 +14,15 @@
 
 ![Jupyter Terminal Demo](docs/jupyter-terminal-demo.png)
 
+## 分支说明
+
+目前仓库里保留两条路线：
+
+- `master`: 原始实现，前端基于 `anywidget` + `xterm.js`
+- `ipywidgets`: 兼容分支，前端改成标准 `ipywidgets` + 前端 JS bridge
+
+之所以保留两条分支，是因为有些托管 Jupyter 环境虽然允许跑 notebook，却会拦截 `anywidget` 这类自定义前端资源加载。`master` 适合前端能力完整的环境，`ipywidgets` 分支则是为这种受限环境准备的替代实现。
+
 现在这版支持的东西包括：
 
 - 后端使用伪终端 `PTY`
